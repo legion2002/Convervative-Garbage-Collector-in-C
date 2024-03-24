@@ -20,13 +20,13 @@ typedef unsigned long long ulong64;
 
 #define SEGMENT_SIZE (4ULL << 30)
 #define PAGE_SIZE 4096
-#define METADATA_SIZE ((SEGMENT_SIZE/PAGE_SIZE) * 2)
-#define NUM_PAGES_IN_SEG (METADATA_SIZE/2)
-#define OTHER_METADATA_SIZE ((METADATA_SIZE/PAGE_SIZE) * 2)
+#define METADATA_SIZE ((SEGMENT_SIZE / PAGE_SIZE) * 2)
+#define NUM_PAGES_IN_SEG (METADATA_SIZE / 2)
+#define OTHER_METADATA_SIZE ((METADATA_SIZE / PAGE_SIZE) * 2)
 #define COMMIT_SIZE PAGE_SIZE
-#define Align(x, y) (((x) + (y-1)) & ~(y-1))
-#define ADDR_TO_PAGE(x) (char*)(((ulong64)(x)) & ~(PAGE_SIZE-1))
-#define ADDR_TO_SEGMENT(x) (Segment*)(((ulong64)(x)) & ~(SEGMENT_SIZE-1))
+#define Align(x, y) (((x) + (y - 1)) & ~(y - 1))
+#define ADDR_TO_PAGE(x) (char *)(((ulong64)(x)) & ~(PAGE_SIZE - 1))
+#define ADDR_TO_SEGMENT(x) (Segment *)(((ulong64)(x)) & ~(SEGMENT_SIZE - 1))
 #define FREE 1
 #define MARK 2
 #define GC_THRESHOLD (32ULL << 20)
@@ -34,7 +34,7 @@ typedef unsigned long long ulong64;
 long long NumGCTriggered = 0;
 long long NumBytesFreed = 0;
 long long NumBytesAllocated = 0;
-extern char  etext, edata, end;
+extern char etext, edata, end;
 
 struct OtherMetadata
 {
@@ -69,17 +69,16 @@ typedef struct ObjHeader
 
 #define OBJ_HEADER_SIZE (sizeof(ObjHeader))
 
-
 static SegmentList *Segments = NULL;
 
 static void setAllocPtr(Segment *Seg, char *Ptr) { Seg->Other.AllocPtr = Ptr; }
 static void setCommitPtr(Segment *Seg, char *Ptr) { Seg->Other.CommitPtr = Ptr; }
 static void setReservePtr(Segment *Seg, char *Ptr) { Seg->Other.ReservePtr = Ptr; }
 static void setDataPtr(Segment *Seg, char *Ptr) { Seg->Other.DataPtr = Ptr; }
-static char* getAllocPtr(Segment *Seg) { return Seg->Other.AllocPtr; }
-static char* getCommitPtr(Segment *Seg) { return Seg->Other.CommitPtr; }
-static char* getReservePtr(Segment *Seg) { return Seg->Other.ReservePtr; }
-static char* getDataPtr(Segment *Seg) { return Seg->Other.DataPtr; }
+static char *getAllocPtr(Segment *Seg) { return Seg->Other.AllocPtr; }
+static char *getCommitPtr(Segment *Seg) { return Seg->Other.CommitPtr; }
+static char *getReservePtr(Segment *Seg) { return Seg->Other.ReservePtr; }
+static char *getDataPtr(Segment *Seg) { return Seg->Other.DataPtr; }
 static void setBigAlloc(Segment *Seg, int BigAlloc) { Seg->Other.BigAlloc = BigAlloc; }
 static int getBigAlloc(Segment *Seg) { return Seg->Other.BigAlloc; }
 static void myfree(void *Ptr);
@@ -101,9 +100,9 @@ static void addToSegmentList(Segment *Seg)
 static void allowAccess(void *Ptr, size_t Size)
 {
 	assert((Size % PAGE_SIZE) == 0);
-	assert(((ulong64)Ptr & (PAGE_SIZE-1)) == 0);
+	assert(((ulong64)Ptr & (PAGE_SIZE - 1)) == 0);
 
-	int Ret = mprotect(Ptr, Size, PROT_READ|PROT_WRITE);
+	int Ret = mprotect(Ptr, Size, PROT_READ | PROT_WRITE);
 	if (Ret == -1)
 	{
 		printf("unable to mprotect %s():%d\n", __func__, __LINE__);
@@ -111,9 +110,9 @@ static void allowAccess(void *Ptr, size_t Size)
 	}
 }
 
-static Segment* allocateSegment(int BigAlloc)
+static Segment *allocateSegment(int BigAlloc)
 {
-	void* Base = mmap(NULL, SEGMENT_SIZE * 2, PROT_NONE, MAP_ANON|MAP_PRIVATE, -1, 0);
+	void *Base = mmap(NULL, SEGMENT_SIZE * 2, PROT_NONE, MAP_ANON | MAP_PRIVATE, -1, 0);
 	if (Base == MAP_FAILED)
 	{
 		printf("unable to allocate a segment\n");
@@ -121,11 +120,11 @@ static Segment* allocateSegment(int BigAlloc)
 	}
 
 	/* segments are aligned to segment size */
-	Segment *Segment = (struct Segment*)Align((ulong64)Base, SEGMENT_SIZE);
+	Segment *Segment = (struct Segment *)Align((ulong64)Base, SEGMENT_SIZE);
 	allowAccess(Segment, METADATA_SIZE);
 
-	char *AllocPtr = (char*)Segment + METADATA_SIZE;
-	char *ReservePtr = (char*)Segment + SEGMENT_SIZE;
+	char *AllocPtr = (char *)Segment + METADATA_SIZE;
+	char *ReservePtr = (char *)Segment + SEGMENT_SIZE;
 	setAllocPtr(Segment, AllocPtr);
 	setReservePtr(Segment, ReservePtr);
 	setCommitPtr(Segment, AllocPtr);
@@ -154,11 +153,11 @@ static void extendCommitSpace(Segment *Seg)
 	}
 }
 
-static unsigned short* getSizeMetadata(char *Ptr)
+static unsigned short *getSizeMetadata(char *Ptr)
 {
 	char *Page = ADDR_TO_PAGE(Ptr);
 	Segment *Seg = ADDR_TO_SEGMENT(Ptr);
-	ulong64 PageNo = (Page - (char*)Seg)/ PAGE_SIZE;
+	ulong64 PageNo = (Page - (char *)Seg) / PAGE_SIZE;
 	return &Seg->Size[PageNo];
 }
 
@@ -170,7 +169,7 @@ static void createHole(Segment *Seg)
 	if (HoleSz > 0)
 	{
 		assert(HoleSz >= 8);
-		ObjHeader *Header = (ObjHeader*)AllocPtr;
+		ObjHeader *Header = (ObjHeader *)AllocPtr;
 		Header->Size = HoleSz;
 		Header->Status = 0;
 		setAllocPtr(Seg, CommitPtr);
@@ -182,8 +181,8 @@ static void createHole(Segment *Seg)
 static void reclaimMemory(void *Ptr, size_t Size)
 {
 	assert((Size % PAGE_SIZE) == 0);
-	assert(((ulong64)Ptr & (PAGE_SIZE-1)) == 0);
-	
+	assert(((ulong64)Ptr & (PAGE_SIZE - 1)) == 0);
+
 	int Ret = mprotect(Ptr, Size, PROT_NONE);
 	if (Ret == -1)
 	{
@@ -201,20 +200,23 @@ static void reclaimMemory(void *Ptr, size_t Size)
 /* used by the GC to free objects. */
 static void myfree(void *Ptr)
 {
-	ObjHeader *Header = (ObjHeader*)((char*)Ptr - OBJ_HEADER_SIZE);
+	ObjHeader *Header = (ObjHeader *)((char *)Ptr - OBJ_HEADER_SIZE);
 	assert((Header->Status & FREE) == 0);
+	// Status ->000000 0 0
+	// FREE   ->000000 0 1
+	// Result ->000000 0 0
 	NumBytesFreed += Header->Size;
 
 	if (Header->Size > COMMIT_SIZE)
 	{
 		assert((Header->Size % PAGE_SIZE) == 0);
-		assert(((ulong64)Header & (PAGE_SIZE-1)) == 0);
+		assert(((ulong64)Header & (PAGE_SIZE - 1)) == 0);
 		size_t Size = Header->Size;
-		char *Start = (char*)Header;
+		char *Start = (char *)Header;
 		size_t Iter;
 		for (Iter = 0; Iter < Size; Iter += PAGE_SIZE)
 		{
-			unsigned short *SzMeta = getSizeMetadata((char*)Start + Iter);
+			unsigned short *SzMeta = getSizeMetadata((char *)Start + Iter);
 			SzMeta[0] = PAGE_SIZE;
 		}
 		Header->Status = FREE;
@@ -222,7 +224,7 @@ static void myfree(void *Ptr)
 		return;
 	}
 
-	unsigned short *SzMeta = getSizeMetadata((char*)Header);
+	unsigned short *SzMeta = getSizeMetadata((char *)Header);
 	SzMeta[0] += Header->Size;
 	assert(SzMeta[0] <= PAGE_SIZE);
 	Header->Status = FREE;
@@ -233,7 +235,7 @@ static void myfree(void *Ptr)
 	}
 }
 
-static void* BigAlloc(size_t Size)
+static void *BigAlloc(size_t Size)
 {
 	size_t AlignedSize = Align(Size + OBJ_HEADER_SIZE, PAGE_SIZE);
 	assert(AlignedSize <= SEGMENT_SIZE - METADATA_SIZE);
@@ -260,13 +262,12 @@ static void* BigAlloc(size_t Size)
 	unsigned short *SzMeta = getSizeMetadata(AllocPtr);
 	SzMeta[0] = 1;
 
-	ObjHeader *Header = (ObjHeader*)AllocPtr;
+	ObjHeader *Header = (ObjHeader *)AllocPtr;
 	Header->Size = AlignedSize;
 	Header->Status = 0;
 	Header->Type = 0;
 	return AllocPtr + OBJ_HEADER_SIZE;
 }
-
 
 void *_mymalloc(size_t Size)
 {
@@ -310,7 +311,7 @@ void *_mymalloc(size_t Size)
 
 	NumBytesAllocated += AlignedSize;
 	setAllocPtr(CurSeg, NewAllocPtr);
-	ObjHeader *Header = (ObjHeader*)AllocPtr;
+	ObjHeader *Header = (ObjHeader *)AllocPtr;
 	Header->Size = AlignedSize;
 	Header->Status = 0;
 	Header->Type = 0;
@@ -318,7 +319,7 @@ void *_mymalloc(size_t Size)
 }
 
 /* scan objects in the scanner list.
- * add newly encountered unmarked objects 
+ * add newly encountered unmarked objects
  * to the scanner list after marking them.
  */
 void scanner()
@@ -330,13 +331,43 @@ void sweep()
 {
 }
 
+typedef struct ObjNode
+{
+	ObjHeader *obj;
+	struct ObjNode *next;
+} ObjNode;
+
+static ObjNode *scannerList = NULL;
+
+static void addToScannerList(ObjHeader *obj)
+{
+	ObjNode *newNode = (ObjNode *)_mymalloc(sizeof(ObjNode));
+	newNode->obj = obj;
+	newNode->next = scannerList;
+	scannerList = newNode;
+}
+
 /* walk all addresses in the range [Top, Bottom-8].
- * add unmarked valid objects to the 
+ * add unmarked valid objects to the
  * scanner list after marking them
  * for scanning.
  */
 static void scanRoots(unsigned char *Top, unsigned char *Bottom)
 {
+	unsigned char *Ptr = Top;
+	while (Ptr < Bottom)
+	{
+		ObjHeader *Header = (ObjHeader *)Ptr;
+		if ((Header->Status & FREE) == 0)
+		{
+			printf("Object size: %u\n", Header->Size);
+			printf("Object Status: %u\n", Header->Status);
+
+			Header->Status |= MARK;
+			addToScannerList(Header);
+		}
+		Ptr += Header->Size;
+	}
 }
 
 static size_t
@@ -351,15 +382,17 @@ getDataSecSz()
 	}
 	DsecSz = -1;
 
-	ssize_t Count = readlink( "/proc/self/exe", Exec, PATH_SZ);
+	ssize_t Count = readlink("/proc/self/exe", Exec, PATH_SZ);
 
-	if (Count == -1) {
+	if (Count == -1)
+	{
 		return -1;
 	}
 	Exec[Count] = '\0';
 
 	int fd = open(Exec, O_RDONLY);
-	if (fd == -1) {
+	if (fd == -1)
+	{
 		return -1;
 	}
 
@@ -367,23 +400,21 @@ getDataSecSz()
 	fstat(fd, &Statbuf);
 
 	char *Base = mmap(NULL, Statbuf.st_size, PROT_READ, MAP_SHARED, fd, 0);
-	if (Base == NULL) {
+	if (Base == NULL)
+	{
 		close(fd);
 		return -1;
 	}
 
-	Elf64_Ehdr *Header = (Elf64_Ehdr*)Base;
+	Elf64_Ehdr *Header = (Elf64_Ehdr *)Base;
 
-	if (Header->e_ident[0] != 0x7f
-		|| Header->e_ident[1] != 'E'
-		|| Header->e_ident[2] != 'L'
-		|| Header->e_ident[3] != 'F')
+	if (Header->e_ident[0] != 0x7f || Header->e_ident[1] != 'E' || Header->e_ident[2] != 'L' || Header->e_ident[3] != 'F')
 	{
 		goto out;
 	}
 
 	int i;
-	Elf64_Shdr *Shdr = (Elf64_Shdr*)(Base + Header->e_shoff);
+	Elf64_Shdr *Shdr = (Elf64_Shdr *)(Base + Header->e_shoff);
 	char *Strtab = Base + Shdr[Header->e_shstrndx].sh_offset;
 
 	for (i = 0; i < Header->e_shnum; i++)
@@ -401,8 +432,6 @@ out:
 	return DsecSz;
 }
 
-
-
 void _runGC()
 {
 	NumGCTriggered++;
@@ -412,45 +441,44 @@ void _runGC()
 
 	if (DataSecSz == -1)
 	{
-		DataStart = (unsigned char*)&etext;
+		DataStart = (unsigned char *)&etext;
 	}
 	else
 	{
-		DataStart = (unsigned char*)((char*)&edata - DataSecSz);
+		DataStart = (unsigned char *)((char *)&edata - DataSecSz);
 	}
-	unsigned char *DataEnd = (unsigned char*)(&edata);
+	unsigned char *DataEnd = (unsigned char *)(&edata);
 
 	/* scan global variables */
 	scanRoots(DataStart, DataEnd);
 
-	unsigned char *UnDataStart = (unsigned char*)(&edata);
-	unsigned char *UnDataEnd = (unsigned char*)(&end);
+	unsigned char *UnDataStart = (unsigned char *)(&edata);
+	unsigned char *UnDataEnd = (unsigned char *)(&end);
 
 	/* scan uninitialized global variables */
 	scanRoots(UnDataStart, UnDataEnd);
 
-	
 	int Lvar;
 	void *Base;
 	size_t Size;
 	pthread_attr_t Attr;
-	
+
 	int Ret = pthread_getattr_np(pthread_self(), &Attr);
 	if (Ret != 0)
 	{
 		printf("Error getting stackinfo\n");
 		return;
 	}
-	Ret = pthread_attr_getstack(&Attr , &Base, &Size);
+	Ret = pthread_attr_getstack(&Attr, &Base, &Size);
 	if (Ret != 0)
 	{
 		printf("Error getting stackinfo\n");
 		return;
 	}
-	unsigned char *Bottom = (unsigned char*)(Base + Size);
-	unsigned char *Top = (unsigned char*)&Lvar;
+	unsigned char *Bottom = (unsigned char *)(Base + Size);
+	unsigned char *Top = (unsigned char *)&Lvar;
 	/* skip GC stack frame */
-	while (*((unsigned*)Top) != MAGIC_ADDR)
+	while (*((unsigned *)Top) != MAGIC_ADDR)
 	{
 		assert(Top < Bottom);
 		Top++;
