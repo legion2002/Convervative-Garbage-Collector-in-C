@@ -80,7 +80,7 @@ void addToScannerList(ObjHeader *header)
 	ScannerNode *node = malloc(sizeof(ScannerNode));
 	if (node == NULL)
 	{
-		printf("Error: failed to allocate memory for scanner node\n");
+		printf("Error with malloc in scanner list\n");
 		return;
 	}
 
@@ -235,7 +235,6 @@ static void reclaimMemory(void *Ptr, size_t Size)
 /* used by the GC to free objects. */
 static void myfree(void *Ptr)
 {
-
 	ObjHeader *Header = (ObjHeader *)((char *)Ptr - OBJ_HEADER_SIZE);
 	assert((Header->Status & FREE) == 0);
 	// Status ->000000 0 0
@@ -354,175 +353,226 @@ void *_mymalloc(size_t Size)
 	return AllocPtr + OBJ_HEADER_SIZE;
 }
 
+void checkPointerValidity(unsigned char *Ptr)
+{
+	SegmentList *segList = Segments;
+	ObjHeader *Header = NULL;
+
+	// Check if the current address is a valid pointer
+	while (segList)
+	{
+		Segment *seg = segList->Segment;
+
+		unsigned char *value = (char *)(*((ulong64 *)Ptr));
+
+		// TODO: this could also have been a check between seg and seg + SEGMENT_SIZE
+		if (value >= (unsigned char *)getDataPtr(seg) && value <= (unsigned char *)getAllocPtr(seg))
+		{
+			// printf("Found something with allocVal: %d\n", getBigAlloc(seg));
+
+			if (getBigAlloc(seg) == 1)
+			{
+				// printf("It is a big alloc\n");
+				char *Page = ADDR_TO_PAGE(value);
+				Segment *Seg = ADDR_TO_SEGMENT(value);
+				ulong64 PageNo = (Page - (char *)Seg) / PAGE_SIZE;
+				while (PageNo >= 0)
+				{
+					if (Seg->Size[PageNo] == 1)
+					{
+
+						Header = (ObjHeader *)(Page);
+
+						break;
+					}
+					// TODO: Fix Page tings
+					PageNo--;
+					Page -= PAGE_SIZE;
+				}
+			}
+			else
+			{
+				// Traverse through all objects within in page
+				unsigned char *Page = ADDR_TO_PAGE(value);
+
+				while (Page)
+				{
+					if (Page > (unsigned char *)(ADDR_TO_PAGE(value) + PAGE_SIZE))
+					{
+						break;
+					}
+
+					Header = (ObjHeader *)Page;
+					unsigned char *start = Page + OBJ_HEADER_SIZE;
+					unsigned char *end = Page + Header->Size;
+					if (value >= start && value <= end)
+					{
+						break;
+					}
+
+					Page = end;
+				}
+			}
+
+			break;
+		}
+		segList = segList->Next;
+	}
+
+	if (Header)
+	{
+		if (Header->Size == 0)
+		{
+			return;
+		}
+
+		if (Header->Status == 0)
+		{
+			Header->Status = MARK;
+			addToScannerList(Header);
+		}
+	}
+	else
+	{
+		return;
+	}
+}
+
 /* scan objects in the scanner list.
  * add newly encountered unmarked objects
  * to the scanner list after marking them.
  */
 void scanner()
 {
-	printf("Scanner started\n");
+
 	ScannerNode *node = scannerList;
 	while (node)
 	{
 		char *tempHeader = (char *)node->header;
 		char *start = tempHeader + OBJ_HEADER_SIZE;
-		char *end = tempHeader + node->header->Size;
+		char *end = tempHeader + ((ObjHeader *)tempHeader)->Size;
 
-		for (char *Ptr = start; Ptr < end; Ptr += 8)
+		// printf("Start: %p\n", start);
+		// printf("End: %p\n", end);
+
+		for (char *Ptr = start; Ptr <= end - 8; Ptr++)
 		{
-			SegmentList *segList = Segments;
-			ObjHeader *Header = NULL;
+			// printf("Start: %p\n", start);
+			// printf("End: %p\n", end);
+			checkPointerValidity(Ptr);
 
-			// Check if the current address is a valid pointer
-			while (segList)
-			{
-				Segment *seg = segList->Segment;
-
-				unsigned char *value = (char *)(*((ulong64 *)Ptr));
-
-				// TODO: this could also have been a check between seg and seg + SEGMENT_SIZE
-				if (value >= (unsigned char *)getDataPtr(seg) && value <= (unsigned char *)getAllocPtr(seg))
-				{
-					// printf("Found something with allocVal: %d\n", getBigAlloc(seg));
-
-					if (getBigAlloc(seg) == 1)
-					{
-						// printf("It is a big alloc\n");
-						char *Page = ADDR_TO_PAGE(value);
-						Segment *Seg = ADDR_TO_SEGMENT(value);
-						ulong64 PageNo = (Page - (char *)Seg) / PAGE_SIZE;
-						while (PageNo >= 0)
-						{
-							if (Seg->Size[PageNo] == 1)
-							{
-
-								Header = (ObjHeader *)(Page);
-
-								break;
-							}
-							// TODO: Fix Page tings
-							PageNo--;
-							Page -= PAGE_SIZE;
-						}
-					}
-					else
-					{
-						// printf("It is a small alloc\n");
-						Header = (ObjHeader *)ADDR_TO_PAGE(value);
-					}
-					break;
-				}
-				segList = segList->Next;
-			}
-
-			if (Header)
-			{
-				if (Header->Size == 0)
-				{
-					Ptr += 8;
-				}
-				else
-				{
-					if ((Header->Status & FREE) == 0)
-					{
-						if ((Header->Status & MARK) == 0)
-						{
-							Header->Status |= MARK;
-							addToScannerList(Header);
-						}
-					}
-					Ptr += Header->Size;
-				}
-			}
-			else
-			{
-				// TODO: This could be wrong
-				Ptr += 8;
-			}
+			// printf("Ptr: %p\n", Ptr);
 		}
+		// printf("reached here\n");
+		// exit(0);
 
 		node = node->next;
+		scannerList = node;
 	}
-	printf("Scanner ended\n");
 }
 
 /* Free all unmarked objects. */
-void sweep()
+static void sweep()
 {
-	printf("Sweep started \n");
 	SegmentList *segList = Segments;
-	while (segList != NULL)
+	ObjHeader *Header = NULL;
+
+	while (segList)
 	{
 		Segment *seg = segList->Segment;
-		char *dataPtr = getDataPtr(seg);
-		char *allocPtr = getAllocPtr(seg);
 
-		if (getBigAlloc(seg) == 0)
+		if (getBigAlloc(seg) == 1)
 		{
-			// Small object segment
-			char *ptr = dataPtr;
-			while (ptr < allocPtr)
+			// Big alloc
+			char *allocPointer = getAllocPtr(seg);
+			char *dataPointer = getDataPtr(seg);
+			char *tempPointer = dataPointer;
+
+			while (tempPointer < allocPointer)
 			{
-				ObjHeader *header = (ObjHeader *)ptr;
-				printf("Header size: %d\n", header->Size);
-				printf("Header status: %d\n", header->Status);
-				char *temp = NULL;
-				int callFree = 0;
-				if ((header->Status & FREE) == 0)
+				// get size metadata
+				unsigned short *SzMeta = getSizeMetadata(tempPointer);
+				if (SzMeta[0] == 1)
 				{
-					if ((header->Status & MARK) == 0)
-					{
-						callFree = 1;
-						temp = ptr;
+					Header = (ObjHeader *)(tempPointer);
+					long sizeHeader = Header->Size;
 
-						// Object is not marked, free it
-						// myfree(ptr + OBJ_HEADER_SIZE);
-					}
-					else
-					{
-						// Clear the mark bit for the next GC cycle
-						header->Status &= ~MARK;
-					}
-				}
-				if (callFree == 1)
-				{
-					myfree(temp);
-				}
+					// printf("reached here\n");
+					// printf("Header status: %d\n", Header->Status);
 
-				ptr += header->Size;
+					// If it is not marked
+					if (Header->Status == 0)
+					{
+						// printf("calling myfree\n");
+						myfree(tempPointer + OBJ_HEADER_SIZE);
+					}
+					else if (Header->Status == MARK)
+					{
+						Header->Status = 0;
+					}
+					tempPointer += sizeHeader;
+				}
+				tempPointer += PAGE_SIZE;
 			}
 		}
-		// else
-		// {
-		// 	// Big object segment
-		// 	char *page = dataPtr;
-		// 	while (page < allocPtr)
-		// 	{
-		// 		unsigned short *sizeMetadata = getSizeMetadata(page);
-		// 		if (*sizeMetadata == 1)
-		// 		{
-		// 			ObjHeader *header = (ObjHeader *)page;
-		// 			if ((header->Status & FREE) == 0)
-		// 			{
-		// 				if ((header->Status & MARK) == 0)
-		// 				{
-		// 					// Object is not marked, free it
-		// 					myfree(page + OBJ_HEADER_SIZE);
-		// 				}
-		// 				else
-		// 				{
-		// 					// Clear the mark bit for the next GC cycle
-		// 					header->Status &= ~MARK;
-		// 				}
-		// 			}
-		// 			page += header->Size;
-		// 		}
-		// 		else
-		// 		{
-		// 			page += PAGE_SIZE;
-		// 		}
-		// 	}
-		// }
+		else
+		{
+			// Small alloc
+			char *allocPointer = getAllocPtr(seg);
+			char *dataPointer = getDataPtr(seg);
+			char *tempPtr = dataPointer;
+
+			while (tempPtr < allocPointer)
+			{
+				Header = (ObjHeader *)(tempPtr);
+				long sizeHeader = Header->Size;
+
+				unsigned short *SzMeta = getSizeMetadata(tempPtr);
+
+				if (SzMeta[0] == PAGE_SIZE)
+				{
+					break;
+				}
+
+				unsigned char *Page = tempPtr;
+
+				while (Page)
+				{
+					if (Page > (unsigned char *)(tempPtr + PAGE_SIZE) || Page > (unsigned char*) allocPointer)
+					{
+						break;
+					}
+
+					Header = (ObjHeader *)Page;
+
+					if ((Header->Status & FREE) == 0)
+					{
+						break;
+					}
+
+					char *temp2Ptr = NULL;
+
+					// If it is not marked
+					if (Header->Status == 0)
+					{
+						temp2Ptr = tempPtr;
+					}
+					else if (Header->Status == MARK)
+					{
+						Header->Status = 0;
+					}
+
+					if (temp2Ptr)
+					{
+						myfree(temp2Ptr + OBJ_HEADER_SIZE);
+					}
+
+					Page = Page + Header->Size;
+				}
+
+				tempPtr += PAGE_SIZE;
+			}
+		}
 
 		segList = segList->Next;
 	}
@@ -537,80 +587,12 @@ static void scanRoots(unsigned char *Top, unsigned char *Bottom)
 {
 	unsigned char *Ptr = Top;
 
-	while (Ptr < Bottom)
+	while (Ptr <= Bottom - 8)
 	{
-		SegmentList *segList = Segments;
-		ObjHeader *Header = NULL;
-
-		// Check if the current address is a valid pointer
-		while (segList)
-		{
-			Segment *seg = segList->Segment;
-
-			unsigned char *value = (char *)(*((ulong64 *)Ptr));
-
-			// TODO: this could also have been a check between seg and seg + SEGMENT_SIZE
-			if (value >= (unsigned char *)getDataPtr(seg) && value <= (unsigned char *)getAllocPtr(seg))
-			{
-				// printf("Found something with allocVal: %d\n", getBigAlloc(seg));
-
-				if (getBigAlloc(seg) == 1)
-				{
-					// printf("It is a big alloc\n");
-					char *Page = ADDR_TO_PAGE(value);
-					Segment *Seg = ADDR_TO_SEGMENT(value);
-					ulong64 PageNo = (Page - (char *)Seg) / PAGE_SIZE;
-					while (PageNo >= 0)
-					{
-						if (Seg->Size[PageNo] == 1)
-						{
-
-							Header = (ObjHeader *)(Page);
-
-							break;
-						}
-						// TODO: Fix Page tings
-						PageNo--;
-						Page -= PAGE_SIZE;
-					}
-				}
-				else
-				{
-
-					Header = (ObjHeader *)ADDR_TO_PAGE(value);
-				}
-
-				break;
-			}
-			segList = segList->Next;
-		}
-
-		if (Header)
-		{
-			if (Header->Size == 0)
-			{
-				Ptr += 8;
-			}
-			else
-			{
-				if ((Header->Status & FREE) == 0)
-				{
-					if ((Header->Status & MARK) == 0)
-					{
-						Header->Status |= MARK;
-						addToScannerList(Header);
-					}
-				}
-				Ptr += Header->Size;
-			}
-		}
-		else
-		{
-			// TODO: This could be wrong
-			Ptr += 8;
-		}
+		checkPointerValidity(Ptr);
+		Ptr += 1;
 	}
-	printf("ScanRoots done\n");
+	// printf("ScanRoots done\n");
 }
 
 static size_t
@@ -762,3 +744,4 @@ void printMemoryStats()
 // Page 3 ( 2048)
 // Start of Commit ( Commit Pointer )
 // End of Segment ( Reserve Pointer)
+// Source: Used LLMs to generate basic linked list logic, and help with C syntax
